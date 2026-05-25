@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exit_code=0
+uv run ruff check --select E,F,I --ignore E501 || exit_code=$?
+echo
+uv run ruff format --check || exit_code=$?
+echo
+bin/test || exit_code=$?
+[ $exit_code -eq 0 ] && echo "All checks passed!"
+exit $exit_code

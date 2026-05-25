@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== integration tests ==="
+# Exit code 5 means no tests were collected; treat that as success
+uv run pytest tests/integration --cov --cov-report=term-missing "$@" || [ $? -eq 5 ]

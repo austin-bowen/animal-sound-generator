@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== unit tests ==="
+# Exit code 5 means no tests were collected; treat that as success
+uv run pytest tests/unit --cov --cov-report=term-missing "$@" || [ $? -eq 5 ]

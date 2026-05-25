@@ -1,0 +1,10 @@
+*.pyc
+.coverage
+.idea/
+.pypirc
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+dist/
+uv.lock
