@@ -1,6 +1,7 @@
 import argparse
 
 from asg.datasets import load_animal_sounds_dataset
+from asg.models import Model0
 
 
 def main() -> None:
@@ -9,6 +10,8 @@ def main() -> None:
 
     dataset = load_animal_sounds_dataset(args.dataset)
     print(dataset)
+
+    model = Model0()
 
 
 def parse_args() -> argparse.Namespace:
