@@ -1,4 +1,12 @@
 import argparse
+import os
+
+import numpy as np
+import torch
+import torchaudio
+from torch import nn
+from torchaudio.functional import resample
+from tqdm import tqdm
 
 from asg.datasets import load_animal_sounds_dataset
 from asg.models import Model0
@@ -8,10 +16,84 @@ def main() -> None:
     args = parse_args()
     print(args)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision("high")
+
     dataset = load_animal_sounds_dataset(args.dataset)
-    print(dataset)
+
+    dataset = np.stack(
+        [
+            row["audio"].get_all_samples().data
+            for row in tqdm(dataset, desc="Loading dataset")
+        ]
+    )
+    dataset = dataset.squeeze(1)
+    dataset = resample(torch.from_numpy(dataset), 44_100, 24_000).numpy()
+    print(f"dataset.shape={dataset.shape}")
+
+    samples = torch.from_numpy(dataset[:10])
+    save_audio("tmp/audio/dataset", samples, sample_rate=24_000)
 
     model = Model0()
+    model.to(device)
+    model.compile()
+
+    # with torch.no_grad():
+    #     _, dataset_z = model.encode(torch.from_numpy(dataset[:100]).to(device))
+    #     dataset_z = dataset_z.detach().cpu().numpy()
+
+    optim = torch.optim.AdamW(
+        model.parameters(),
+        lr=1e-4,
+        # weight_decay=1e-3,
+        weight_decay=0,
+    )
+
+    recon_loss_fn = nn.MSELoss()
+
+    batch_size = 10
+    for epoch in range(100):
+        model.train()
+        losses = []
+        for step in range(dataset.shape[0] // batch_size):
+            samples = dataset[step * batch_size : (step + 1) * batch_size]
+            # samples = dataset_z[step * batch_size : (step + 1) * batch_size]
+            samples = torch.from_numpy(samples).to(device)
+
+            h, z_hat, z = model(samples)
+            # z = samples
+            # h = model.encoder(z)
+            # z_hat = model.decoder(h)
+
+            recon_loss = recon_loss_fn(z_hat, z)
+            # corr_loss = (
+            #     ((h.T @ h) * (1 - torch.eye(h.shape[1], device=device))).pow(2).mean()
+            # )
+            corr_loss = torch.tensor(0.0)
+            loss = recon_loss# + corr_loss
+
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+
+            loss = loss.item()
+            losses.append(loss)
+            print(
+                f"[e{epoch}; s{step}] loss: {loss} "
+                f"(recon: {recon_loss.item()}, corr: {corr_loss.item()})"
+            )
+
+        avg_loss = np.mean(losses)
+        print(f"[e{epoch}] avg loss: {avg_loss}")
+        print()
+
+        model.eval()
+        with torch.no_grad():
+            samples = torch.from_numpy(dataset[:10]).to(device)
+            samples = model.decode(model.encode(samples)[0])
+            # samples = model.dac_model.decode(model.encode(samples)[1]).squeeze(1)
+            save_audio(f"tmp/audio/epoch={epoch}", samples, sample_rate=24_000)
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +112,14 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+def save_audio(path, batch: torch.Tensor, sample_rate: int) -> None:
+    os.makedirs(path, exist_ok=True)
+    batch = batch.cpu()
+    for row in range(batch.size(0)):
+        audio = batch[row : row + 1]
+        torchaudio.save(f"{path}/{row}.wav", audio, sample_rate)
 
 
 if __name__ == "__main__":
