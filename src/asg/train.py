@@ -11,6 +11,8 @@ from tqdm import tqdm
 from asg.datasets import load_animal_sounds_dataset
 from asg.models import Model0
 
+SAVE_SAMPLE_COUNT = 40
+
 
 def main() -> None:
     args = parse_args()
@@ -29,10 +31,13 @@ def main() -> None:
         ]
     )
     dataset = dataset.squeeze(1)
-    dataset = resample(torch.from_numpy(dataset), 44_100, 24_000).numpy()
+    dataset = torch.from_numpy(dataset)
+    dataset = resample(dataset, 44_100, 24_000).numpy()
+    dataset = dataset[:40, :]
     print(f"dataset.shape={dataset.shape}")
 
-    samples = torch.from_numpy(dataset[:10])
+    test_dataset = dataset[:SAVE_SAMPLE_COUNT].copy()
+    samples = torch.from_numpy(test_dataset)
     save_audio("tmp/audio/dataset", samples, sample_rate=24_000)
 
     model = Model0()
@@ -45,15 +50,18 @@ def main() -> None:
 
     optim = torch.optim.AdamW(
         model.parameters(),
-        lr=1e-4,
+        lr=5e-4,
         # weight_decay=1e-3,
         weight_decay=0,
     )
 
     recon_loss_fn = nn.MSELoss()
 
-    batch_size = 10
-    for epoch in range(100):
+    batch_size = min(5, dataset.shape[0])
+    for epoch in range(1000):
+        # Shuffle dataset in place
+        np.random.shuffle(dataset)
+
         model.train()
         losses = []
         for step in range(dataset.shape[0] // batch_size):
@@ -74,6 +82,7 @@ def main() -> None:
             loss = recon_loss# + corr_loss
 
             optim.zero_grad()
+            # nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
             loss.backward()
             optim.step()
 
@@ -88,12 +97,17 @@ def main() -> None:
         print(f"[e{epoch}] avg loss: {avg_loss}")
         print()
 
-        model.eval()
-        with torch.no_grad():
-            samples = torch.from_numpy(dataset[:10]).to(device)
-            samples = model.decode(model.encode(samples)[0])
-            # samples = model.dac_model.decode(model.encode(samples)[1]).squeeze(1)
-            save_audio(f"tmp/audio/epoch={epoch}", samples, sample_rate=24_000)
+        if epoch % 10 == 0:
+            model.eval()
+            with torch.no_grad():
+                samples = torch.from_numpy(test_dataset).to(device)
+                samples = model.decode(model.encode(samples)[0])
+                # samples = model.dac_model.decode(model.encode(samples)[1]).squeeze(1)
+                save_audio(f"tmp/audio/epoch={epoch}", samples, sample_rate=24_000)
+
+            if avg_loss < 1.0:
+                print('Early stop!')
+                break
 
 
 def parse_args() -> argparse.Namespace:
