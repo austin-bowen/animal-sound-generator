@@ -33,7 +33,7 @@ def main() -> None:
     dataset = dataset.squeeze(1)
     dataset = torch.from_numpy(dataset)
     dataset = resample(dataset, 44_100, 24_000).numpy()
-    dataset = dataset[:40, :]
+    dataset = dataset[:80, :]
     print(f"dataset.shape={dataset.shape}")
 
     test_dataset = dataset[:SAVE_SAMPLE_COUNT].copy()
@@ -99,11 +99,15 @@ def main() -> None:
 
         if epoch % 10 == 0:
             model.eval()
+            torch.cuda.empty_cache()
             with torch.no_grad():
                 samples = torch.from_numpy(test_dataset).to(device)
                 samples = model.decode(model.encode(samples)[0])
                 # samples = model.dac_model.decode(model.encode(samples)[1]).squeeze(1)
                 save_audio(f"tmp/audio/epoch={epoch}", samples, sample_rate=24_000)
+
+                del samples
+                torch.cuda.empty_cache()
 
             if avg_loss < 1.0:
                 print('Early stop!')
