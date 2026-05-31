@@ -101,10 +101,7 @@ class Model0Encoder(nn.Module):
             dim_feedforward=DIM_FEEDFORWARD,
             dropout=0.0,
             batch_first=True,
-            bias=False,
         )
-        layer.norm1 = nn.RMSNorm(in_dim)
-        layer.norm2 = nn.RMSNorm(in_dim)
         self.transformer = nn.TransformerEncoder(
             layer,
             num_layers=NUM_LAYERS,
@@ -186,10 +183,7 @@ class Model0Decoder(nn.Module):
             dropout=0.0,
             batch_first=True,
             norm_first=True,
-            bias=False,
         )
-        layer.norm1 = nn.RMSNorm(out_dim)
-        layer.norm2 = nn.RMSNorm(out_dim)
         self.transformer = nn.TransformerEncoder(
             layer,
             num_layers=NUM_LAYERS,
