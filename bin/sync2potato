@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# Syncs the repo source to the potato server
+
+rsync \
+  --archive \
+  --compress \
+  --verbose \
+  --exclude='__pycache__' \
+  --exclude='*.pyc' \
+  ./src/ \
+  austin@potato.local:/home/austin/Projects/animal-sound-generator/src/
