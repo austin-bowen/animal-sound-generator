@@ -14,14 +14,14 @@ ESC_50_ANIMAL_CATEGORIES = (
 )
 
 
-def load_animal_sounds_dataset(dataset: str) -> Dataset:
+def load_animal_sounds_dataset(dataset: str) -> tuple[Dataset, Dataset]:
     if dataset == "esc50":
         return load_esc_50_animal_sounds()
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
 
-def load_esc_50_animal_sounds() -> Dataset:
+def load_esc_50_animal_sounds() -> tuple[Dataset, Dataset]:
     """
     Load the ESC-50 dataset filtered for animal sounds.
 
@@ -40,4 +40,8 @@ def load_esc_50_animal_sounds() -> Dataset:
 
     ds = ds["train"].filter(lambda x: x["category"] in ESC_50_ANIMAL_CATEGORIES)
 
-    return ds
+    train_folds = 4  # Out of 5
+    train = ds.filter(lambda x: x["fold"] < train_folds)
+    test = ds.filter(lambda x: x["fold"] >= train_folds)
+
+    return train, test

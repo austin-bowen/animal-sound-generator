@@ -12,6 +12,8 @@ class Model0(nn.Module):
     def __init__(self, h_dim: int = 16) -> None:
         super().__init__()
 
+        self.h_dim = h_dim
+
         # Load pretrained model
         model_path = dac.utils.download(model_type="24khz")
         dac_model = dac.DAC.load(model_path)
@@ -26,22 +28,21 @@ class Model0(nn.Module):
         self.encoder = Model0Encoder(dac_z_dim, h_dim)
         self.decoder = Model0Decoder(h_dim, dac_z_dim)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
-            x: [B, S]
+            z: [B, 1024, T]
 
         Returns:
             Tuple of
             h: [B, h_dim]
             z_hat: [B, 1024, T]
-            z: [B, 1024, T]
         """
 
-        h, z = self.encode(x)
+        h = self.encoder(z)
         z_hat = self.decoder(h)
 
-        return h, z_hat, z
+        return h, z_hat
 
     def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -54,17 +55,27 @@ class Model0(nn.Module):
             z: [B, 1024, T]
         """
 
+        z = self.get_dac_z(x)
+        h = self.encoder(z)
+
+        return h, z
+
+    def get_dac_z(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: [B, S]
+
+        Returns:
+            z: [B, 1024, T]
+        """
+
         with torch.no_grad():
             # Preprocess: resample + pad to model's expected hop size
             x = x.unsqueeze(1)
             x = self.dac_model.preprocess(x, sample_rate=None)
 
             # z, codes, latents, commitment_loss, codebook_loss = self.dac_model.encode(x)
-            z = self.dac_model.encoder(x).detach()
-
-        h = self.encoder(z)
-
-        return h, z
+            return self.dac_model.encoder(x).detach()
 
     def decode(self, h: torch.Tensor) -> torch.Tensor:
         """
