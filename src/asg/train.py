@@ -12,7 +12,7 @@ from torchaudio.functional import resample
 from tqdm import tqdm
 
 from asg.datasets import load_animal_sounds_dataset
-from asg.models import Model0
+from asg.models.model0 import Model0
 
 
 def parse_args() -> argparse.Namespace:
