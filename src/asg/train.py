@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from asg.datasets import load_animal_sounds_dataset
 from asg.models.model0 import Model0
+from asg.models.model1 import Model1
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,7 +27,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--model",
-        choices=["model0"],
+        choices=[
+            "model0",
+            "model1",
+        ],
         required=True,
     )
 
@@ -50,7 +54,12 @@ def main(
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision("high")
 
-    model = Model0()
+    if args.model == "model0":
+        model = Model0()
+    elif args.model == "model1":
+        model = Model1()
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
     model.to(device)
 
     def prepare_dataset(dataset_: Dataset) -> np.ndarray:
