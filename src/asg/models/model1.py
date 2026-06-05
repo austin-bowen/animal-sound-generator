@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+DAC_Z_STD = 3.627
 NHEAD = 32
 DIM_FEEDFORWARD = 1024 * 2
 NUM_LAYERS = 1
@@ -74,8 +75,8 @@ class Model1(nn.Module):
             x = x.unsqueeze(1)
             x = self.dac_model.preprocess(x, sample_rate=None)
 
-            # z, codes, latents, commitment_loss, codebook_loss = self.dac_model.encode(x)
-            return self.dac_model.encoder(x).detach()
+            z = self.dac_model.encoder(x).detach()
+            return z / DAC_Z_STD
 
     def decode(self, h: torch.Tensor) -> torch.Tensor:
         """
@@ -86,12 +87,12 @@ class Model1(nn.Module):
             y: [B, S]
         """
 
-        z_hat = self.decoder(h)
-
         with torch.no_grad():
+            z_hat = self.decoder(h)
+            z_hat = z_hat * DAC_Z_STD
             y = self.dac_model.decoder(z_hat)  # [B, 1, S]  reconstructed waveform
 
-        return y.squeeze(1)
+            return y.squeeze(1)
 
 
 class Model1Encoder(nn.Module):
@@ -172,8 +173,10 @@ class Model1Decoder(nn.Module):
 
         self.in_proj = nn.Linear(in_dim, out_dim)
 
-        self.pos_encodings = nn.Parameter(torch.randn(1, 375, out_dim) * 0.02)
-        self.pos_proj = nn.Linear(out_dim, out_dim)
+        # pos_dim = out_dim
+        pos_dim = 16
+        self.pos_encodings = nn.Parameter(torch.randn(1, 375, pos_dim) * 0.02)
+        self.pos_proj = nn.Linear(pos_dim, out_dim, bias=False)
 
         layer = nn.TransformerDecoderLayer(
             d_model=out_dim,
@@ -205,8 +208,9 @@ class Model1Decoder(nn.Module):
 
         # tokens = tokens.unsqueeze(1).expand(B, 375, self.out_dim)
         # tokens = tokens * self.pos_proj(self.pos_encodings)
-        tokens = self.pos_proj(self.pos_encodings)
-        tokens = tokens.expand(B, 375, self.out_dim)
+        # tokens = self.pos_proj(self.pos_encodings)
+        tokens = h * self.pos_proj(self.pos_encodings)
+        # tokens = tokens.expand(B, 375, self.out_dim)
         assert tokens.shape == (B, 375, self.out_dim)
 
         x = self.transformer(

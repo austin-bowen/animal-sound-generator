@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable
 
 import numpy as np
+import pandas as pd
 import torch
 import torchaudio
 from datasets import Dataset
@@ -78,10 +79,14 @@ def main(
 
     dataset = prepare_dataset(dataset)
     dataset = batch_apply_n2t2n(model.get_dac_z, dataset, device=device, batch_size=10)
+    # dataset_std = np.std(dataset)
+    dataset_std = 1
+    dataset /= dataset_std
     # dataset = dataset[:80, :]
     print(f"train_dataset.shape={dataset.shape}")
 
     test_dataset = prepare_dataset(test_dataset)
+    test_dataset /= dataset_std
     test_dataset = test_dataset[:40, :]
 
     samples = torch.from_numpy(test_dataset)
@@ -155,12 +160,14 @@ def main(
             loss.backward()
             optim.step()
 
-            loss = loss.item()
-            losses.append(loss)
+            losses.append({
+                "loss": loss.item(),
+                **loss_dict,
+            })
 
             print(f"[e{epoch}; s{step}] loss: {loss:.4f} ({loss_dict})")
 
-        avg_loss = np.mean(losses)
+        losses = pd.DataFrame
         print(f"[e{epoch}] avg loss: {avg_loss}")
         print()
 
