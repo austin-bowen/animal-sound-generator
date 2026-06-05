@@ -165,11 +165,9 @@ def main(
                 **loss_dict,
             })
 
-            print(f"[e{epoch}; s{step}] loss: {loss:.4f} ({loss_dict})")
-
-        losses = pd.DataFrame
-        print(f"[e{epoch}] avg loss: {avg_loss}")
-        print()
+        losses = pd.DataFrame(losses).mean().to_dict()
+        avg_train_loss = losses["loss"]
+        print(f"[e{epoch}] train loss: {losses}")
 
         if epoch % 10 == 0:
             model.eval()
@@ -181,7 +179,12 @@ def main(
 
                 loss, loss_dict = get_loss(z_hat, z, h)
 
-                print(f"[e{epoch}] test loss: {loss:.4f} ({loss_dict})")
+                loss_dict = {
+                    "loss": loss.item(),
+                    **loss_dict,
+                }
+
+                print(f"[e{epoch}] test loss : {loss_dict}")
                 print()
 
                 samples = model.decode(h)
@@ -200,7 +203,7 @@ def main(
                 model_checkpoint_path,
             )
 
-            if avg_loss <= early_stop_loss:
+            if avg_train_loss <= early_stop_loss:
                 print('Early stop!')
                 break
 

@@ -174,7 +174,7 @@ class Model1Decoder(nn.Module):
         self.in_proj = nn.Linear(in_dim, out_dim)
 
         # pos_dim = out_dim
-        pos_dim = 16
+        pos_dim = 128
         self.pos_encodings = nn.Parameter(torch.randn(1, 375, pos_dim) * 0.02)
         self.pos_proj = nn.Linear(pos_dim, out_dim, bias=False)
 
