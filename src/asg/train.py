@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 from collections.abc import Callable
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -92,7 +93,9 @@ def main(
     samples = torch.from_numpy(test_dataset)
     save_audio("tmp/audio/dataset", samples, sample_rate=24_000)
 
-    test_dataset = batch_apply_n2t2n(model.get_dac_z, test_dataset, device=device, batch_size=10)
+    test_dataset = batch_apply_n2t2n(
+        model.get_dac_z, test_dataset, device=device, batch_size=10
+    )
     print(f"test_dataset.shape={test_dataset.shape}")
 
     optim = torch.optim.AdamW(
@@ -146,52 +149,33 @@ def main(
         np.random.shuffle(dataset)
 
         model.train()
-        losses = []
-        for step in range(math.ceil(dataset.shape[0] / batch_size)):
-            z = dataset[step * batch_size : (step + 1) * batch_size]
-            z = torch.from_numpy(z).to(device)
-
-            h, z_hat = model(z)
-
-            loss, loss_dict = get_loss(z_hat, z, h)
-
-            optim.zero_grad()
-            # nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
-            loss.backward()
-            optim.step()
-
-            losses.append({
-                "loss": loss.item(),
-                **loss_dict,
-            })
-
-        losses = pd.DataFrame(losses).mean().to_dict()
+        losses: dict[str, float] = run_epoch(
+            model=model,
+            dataset=dataset,
+            batch_size=batch_size,
+            device=device,
+            loss_fn=get_loss,
+            optim=optim,
+        )
         avg_train_loss = losses["loss"]
         print(f"[e{epoch}] train loss: {losses}")
 
         if epoch % 10 == 0:
             model.eval()
-            torch.cuda.empty_cache()
             with torch.no_grad():
-                z = torch.from_numpy(test_dataset).to(device)
+                losses, samples = run_epoch(
+                    model=model,
+                    dataset=test_dataset,
+                    batch_size=batch_size,
+                    device=device,
+                    loss_fn=get_loss,
+                    return_samples=True,
+                )
 
-                h, z_hat = model(z)
-
-                loss, loss_dict = get_loss(z_hat, z, h)
-
-                loss_dict = {
-                    "loss": loss.item(),
-                    **loss_dict,
-                }
-
-                print(f"[e{epoch}] test loss : {loss_dict}")
+                print(f"[e{epoch}]  test loss: {losses}")
                 print()
 
-                samples = model.decode(h)
                 save_audio(f"tmp/audio/epoch={epoch}", samples, sample_rate=24_000)
-
-                del h, z_hat, z, samples
-                torch.cuda.empty_cache()
 
             # Save state
             torch.save(
@@ -204,8 +188,63 @@ def main(
             )
 
             if avg_train_loss <= early_stop_loss:
-                print('Early stop!')
+                print("Early stop!")
                 break
+
+
+def run_epoch(
+    *,
+    model: nn.Module,
+    dataset: np.ndarray,
+    batch_size: int,
+    device,
+    loss_fn,
+    optim: torch.optim.Optimizer | None = None,
+    clip_grad: float | None = None,
+    return_samples: bool = False,
+) -> dict[str, float] | tuple[dict[str, float], torch.Tensor]:
+    losses = []
+    samples = []
+    for step in range(math.ceil(dataset.shape[0] / batch_size)):
+        z = dataset[step * batch_size : (step + 1) * batch_size]
+        if z.shape[0] != batch_size:
+            continue
+
+        z = torch.from_numpy(z).to(device)
+
+        h, z_hat = model(z)
+
+        loss, loss_dict = loss_fn(z_hat, z, h)
+
+        if optim:
+            optim.zero_grad()
+
+            loss.backward()
+            if clip_grad is not None:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad)
+
+            optim.step()
+
+        losses.append(
+            {
+                "loss": loss.item(),
+                **loss_dict,
+            }
+        )
+
+        if return_samples:
+            batch_samples = model.z_to_samples(z_hat)
+            batch_samples = batch_samples.detach().cpu()
+            samples.append(batch_samples)
+
+    losses = pd.DataFrame(losses).mean().to_dict()
+    losses = cast(dict[str, float], losses)
+
+    if return_samples:
+        samples = torch.concat(samples, dim=0)
+        return losses, samples
+    else:
+        return losses
 
 
 def batch_apply_n2t2n(

@@ -74,7 +74,6 @@ class Model0(nn.Module):
             x = x.unsqueeze(1)
             x = self.dac_model.preprocess(x, sample_rate=None)
 
-            # z, codes, latents, commitment_loss, codebook_loss = self.dac_model.encode(x)
             return self.dac_model.encoder(x).detach()
 
     def decode(self, h: torch.Tensor) -> torch.Tensor:
@@ -102,7 +101,9 @@ class Model0Encoder(nn.Module):
         self.out_dim = out_dim
 
         self.cls_token_count = 1
-        self.cls_tokens = nn.Parameter(torch.randn(1, self.cls_token_count, in_dim) * 0.02)
+        self.cls_tokens = nn.Parameter(
+            torch.randn(1, self.cls_token_count, in_dim) * 0.02
+        )
 
         self.pos_encodings = nn.Parameter(torch.randn(1, 375, in_dim) * 0.02)
 
@@ -145,7 +146,7 @@ class Model0Encoder(nn.Module):
         x = self.transformer(x)
         assert x.shape == (B, self.cls_token_count + T, self.in_dim)
 
-        x = x[:, 0:self.cls_token_count, :]  # CLS token outputs
+        x = x[:, 0 : self.cls_token_count, :]  # CLS token outputs
         assert x.shape == (B, self.cls_token_count, self.in_dim)
 
         x = x.flatten(start_dim=1)
@@ -176,9 +177,12 @@ class Model0Decoder(nn.Module):
         # ])
         self.in_proj = nn.Linear(in_dim, out_dim)
 
-        self.pos_encodings = nn.Parameter(torch.randn(1, self.cls_token_count + 375, out_dim) * 0.02)
+        self.pos_encodings = nn.Parameter(
+            torch.randn(1, self.cls_token_count + 375, out_dim) * 0.02
+        )
 
-        # Causal mask: output tokens can attend to all CLS tokens but only past output tokens
+        # Causal mask: output tokens can attend to all CLS tokens
+        # but only past output tokens
         # T = self.cls_token_count + 375
         # causal_mask = torch.zeros(T, T)
         # future = torch.ones(375, 375).triu(diagonal=1).bool()
@@ -201,9 +205,7 @@ class Model0Decoder(nn.Module):
             enable_nested_tensor=False,
         )
 
-        self.memorizer = nn.Parameter(
-            torch.randn(375, out_dim)
-        )
+        self.memorizer = nn.Parameter(torch.randn(375, out_dim))
         self.normy = nn.LayerNorm(out_dim)
         self.pos_proj = nn.Linear(out_dim, out_dim)
         self.projy2 = nn.Linear(out_dim, out_dim)
@@ -238,7 +240,9 @@ class Model0Decoder(nn.Module):
         #     x + pos_encodings[:, 0:self.cls_token_count, :],
         #     pos_encodings[:, self.cls_token_count:, :],
         # ], dim=1)
-        # assert tokens.shape == (B, self.cls_token_count + 375, self.out_dim), tokens.shape
+        # assert tokens.shape == (B, self.cls_token_count + 375, self.out_dim), (
+        #     tokens.shape
+        # )
 
         # TODO multiple proj?
         tokens = self.in_proj(h)
@@ -254,7 +258,7 @@ class Model0Decoder(nn.Module):
         )
         assert x.shape == (B, self.cls_token_count + 375, self.out_dim)
 
-        x = x[:, self.cls_token_count:, :]
+        x = x[:, self.cls_token_count :, :]
         x = x.permute(0, 2, 1)
         assert x.shape == (B, self.out_dim, 375)
 

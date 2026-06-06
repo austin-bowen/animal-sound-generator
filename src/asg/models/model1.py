@@ -89,8 +89,20 @@ class Model1(nn.Module):
 
         with torch.no_grad():
             z_hat = self.decoder(h)
-            z_hat = z_hat * DAC_Z_STD
-            y = self.dac_model.decoder(z_hat)  # [B, 1, S]  reconstructed waveform
+            self.z_to_samples(z_hat)
+
+    def z_to_samples(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            z: [B, 1024, T]
+
+        Returns:
+            y: [B, S]
+        """
+
+        with torch.no_grad():
+            z = z * DAC_Z_STD
+            y = self.dac_model.decoder(z)  # [B, 1, S]  reconstructed waveform
 
             return y.squeeze(1)
 
