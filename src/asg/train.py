@@ -125,15 +125,16 @@ def main(
 
     recon_loss_fn = nn.MSELoss()
 
-    corr_loss_mask = torch.tril(
-        torch.ones(model.h_dim, model.h_dim, device=device),
-        diagonal=-1,  # Exclude diagonal
-    )
+    # corr_loss_mask = torch.tril(
+    #     torch.ones(model.h_dim, model.h_dim, device=device),
+    #     diagonal=-1,  # Exclude diagonal
+    # )
 
-    def get_loss(z_hat_, z_, h_) -> tuple[torch.Tensor, dict[str, float]]:
+    def get_loss(z_hat_, z_, mu_, log_var_) -> tuple[torch.Tensor, dict[str, float]]:
         recon_loss_ = recon_loss_fn(z_hat_, z_)
+        kl_loss_ = -0.5 * (1 + log_var_ - mu_.pow(2) - log_var_.exp()).sum(dim=1).mean()
 
-        # corr_loss_ = (h_.T @ h_) * corr_loss_mask
+        # corr_loss_ = (mu_.T @ mu_) * corr_loss_mask
         # corr_loss_ = corr_loss_.abs().mean()
 
         # cos_loss_ = nn.functional.cosine_similarity(z_hat_, z_, dim=1)
@@ -141,12 +142,13 @@ def main(
 
         # mag_loss_ = (z_hat_.norm(dim=1) - z_.norm(dim=1)).abs().mean()
 
-        loss_ = recon_loss_
+        loss_ = recon_loss_ + 1e-4 * kl_loss_
         # loss_ = recon_loss_ + corr_loss_
         # loss_ = cos_loss_ + 0.001 * mag_loss_
 
         return loss_, dict(
             recon_loss=recon_loss_.item(),
+            kl_loss=kl_loss_.item(),
             # corr_loss=corr_loss_.item(),
             # cos_loss=cos_loss_.item(),
             # mag_loss=mag_loss_.item(),
@@ -221,9 +223,9 @@ def run_epoch(
 
         z = torch.from_numpy(z).to(device)
 
-        h, z_hat = model(z)
+        mu, log_var, z_hat = model(z)
 
-        loss, loss_dict = loss_fn(z_hat, z, h)
+        loss, loss_dict = loss_fn(z_hat, z, mu, log_var)
 
         if optim:
             optim.zero_grad()

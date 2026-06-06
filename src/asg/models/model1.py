@@ -29,37 +29,60 @@ class Model1(nn.Module):
         self.encoder = Model1Encoder(dac_z_dim, h_dim)
         self.decoder = Model1Decoder(h_dim, dac_z_dim)
 
-    def forward(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, z: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             z: [B, 1024, T]
 
         Returns:
             Tuple of
-            h: [B, h_dim]
+            mu: [B, h_dim]
+            log_var: [B, h_dim]
             z_hat: [B, 1024, T]
         """
 
-        h = self.encoder(z)
+        mu, log_var = self.encoder(z)
+        h = self.reparameterize(mu, log_var)
         z_hat = self.decoder(h)
 
-        return h, z_hat
+        return mu, log_var, z_hat
 
-    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def reparameterize(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            mu: [B, h_dim]
+            log_var: [B, h_dim]
+
+        Returns:
+            h: [B, h_dim]
+        """
+
+        if self.training:
+            std = torch.exp(0.5 * log_var)
+            eps = torch.randn_like(std)
+            return mu + eps * std
+        return mu
+
+    def encode(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Args:
             x: [B, S]
 
         Returns:
             Tuple of
-            h: [B, h_dim]
+            mu: [B, h_dim]
+            log_var: [B, h_dim]
             z: [B, 1024, T]
         """
 
         z = self.get_dac_z(x)
-        h = self.encoder(z)
+        mu, log_var = self.encoder(z)
 
-        return h, z
+        return mu, log_var, z
 
     def get_dac_z(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -89,7 +112,7 @@ class Model1(nn.Module):
 
         with torch.no_grad():
             z_hat = self.decoder(h)
-            self.z_to_samples(z_hat)
+            return self.z_to_samples(z_hat)
 
     def z_to_samples(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -134,15 +157,17 @@ class Model1Encoder(nn.Module):
             enable_nested_tensor=False,
         )
 
-        self.out_proj = nn.Linear(self.cls_token_count * in_dim, out_dim)
+        self.out_proj_mu = nn.Linear(self.cls_token_count * in_dim, out_dim)
+        self.out_proj_log_var = nn.Linear(self.cls_token_count * in_dim, out_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             x: [B x in_dim x T] e.g. [1 x 1024 x 375]
 
         Returns:
-            embedding: [B x out_dim]
+            mu: [B x out_dim]
+            log_var: [B x out_dim]
         """
 
         B, _, T = x.shape
@@ -168,12 +193,12 @@ class Model1Encoder(nn.Module):
 
         x = F.relu(x)
 
-        x = self.out_proj(x)
-        assert x.shape == (B, self.out_dim)
+        mu = self.out_proj_mu(x)
+        log_var = self.out_proj_log_var(x)
+        assert mu.shape == (B, self.out_dim)
+        assert log_var.shape == (B, self.out_dim)
 
-        x = F.normalize(x, dim=1)
-
-        return x
+        return mu, log_var
 
 
 class Model1Decoder(nn.Module):
