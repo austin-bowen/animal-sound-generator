@@ -177,31 +177,40 @@ class Model1Encoder(nn.Module):
 
 
 class Model1Decoder(nn.Module):
-    def __init__(self, in_dim: int, out_dim: int):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        mid_dim: int = 64,
+    ):
         super().__init__()
 
         self.in_dim = in_dim
+        self.mid_dim = mid_dim
         self.out_dim = out_dim
 
-        self.in_proj = nn.Linear(in_dim, out_dim)
+        self.in_proj = nn.Linear(in_dim, mid_dim)
 
-        # pos_dim = out_dim
-        pos_dim = 128
+        # pos_dim = mid_dim
+        pos_dim = 64
         self.pos_encodings = nn.Parameter(torch.randn(1, 375, pos_dim) * 0.02)
-        self.pos_proj = nn.Linear(pos_dim, out_dim, bias=False)
+        self.pos_proj = nn.Linear(pos_dim, mid_dim, bias=False)
 
         layer = nn.TransformerDecoderLayer(
-            d_model=out_dim,
-            nhead=NHEAD,
-            dim_feedforward=DIM_FEEDFORWARD,
+            d_model=mid_dim,
+            nhead=8,
+            dim_feedforward=mid_dim * 2,
             dropout=0.0,
             batch_first=True,
             norm_first=True,
         )
         self.transformer = nn.TransformerDecoder(
             layer,
-            num_layers=NUM_LAYERS,
+            num_layers=1,
         )
+
+        self.out_proj = nn.Linear(mid_dim, out_dim)
+        self.out_scale = nn.Linear(mid_dim, 1)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         """
@@ -216,21 +225,33 @@ class Model1Decoder(nn.Module):
 
         h = self.in_proj(h)
         h = h.unsqueeze(1)
-        assert h.shape == (B, 1, self.out_dim)
+        assert h.shape == (B, 1, self.mid_dim)
 
-        # tokens = tokens.unsqueeze(1).expand(B, 375, self.out_dim)
+        # tokens = tokens.unsqueeze(1).expand(B, 375, self.mid_dim)
         # tokens = tokens * self.pos_proj(self.pos_encodings)
         # tokens = self.pos_proj(self.pos_encodings)
-        tokens = h * self.pos_proj(self.pos_encodings)
-        # tokens = tokens.expand(B, 375, self.out_dim)
-        assert tokens.shape == (B, 375, self.out_dim)
+        tokens = h + self.pos_proj(self.pos_encodings)
+        # tokens = tokens.expand(B, 375, self.mid_dim)
+        assert tokens.shape == (B, 375, self.mid_dim)
 
         x = self.transformer(
             tgt=tokens,
             memory=h,
             # mask=self.causal_mask,
         )
-        assert x.shape == (B, 375, self.out_dim)
+        assert x.shape == (B, 375, self.mid_dim)
+
+        out = self.out_proj(F.relu(F.layer_norm(x, (self.mid_dim,))))
+        # out = F.normalize(out, dim=-1)
+        assert out.shape == (B, 375, self.out_dim)
+
+        # scalar = self.out_scale(x) + 1
+        # assert scalar.shape == (B, 375, 1)
+        #
+        # x = out * scalar
+        # assert x.shape == (B, 375, self.out_dim)
+
+        x = out
 
         x = x.permute(0, 2, 1)
         assert x.shape == (B, self.out_dim, 375)

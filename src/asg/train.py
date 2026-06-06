@@ -121,7 +121,7 @@ def main(
     else:
         epoch_start = 0
 
-    model.compile()
+    model.compile(dynamic=False)
 
     recon_loss_fn = nn.MSELoss()
 
@@ -133,14 +133,23 @@ def main(
     def get_loss(z_hat_, z_, h_) -> tuple[torch.Tensor, dict[str, float]]:
         recon_loss_ = recon_loss_fn(z_hat_, z_)
 
-        corr_loss_ = (h_.T @ h_) * corr_loss_mask
-        corr_loss_ = corr_loss_.abs().mean()
+        # corr_loss_ = (h_.T @ h_) * corr_loss_mask
+        # corr_loss_ = corr_loss_.abs().mean()
 
-        loss_ = recon_loss_ + corr_loss_
+        # cos_loss_ = nn.functional.cosine_similarity(z_hat_, z_, dim=1)
+        # cos_loss_ = 1 - cos_loss_.mean()
+
+        # mag_loss_ = (z_hat_.norm(dim=1) - z_.norm(dim=1)).abs().mean()
+
+        loss_ = recon_loss_
+        # loss_ = recon_loss_ + corr_loss_
+        # loss_ = cos_loss_ + 0.001 * mag_loss_
 
         return loss_, dict(
             recon_loss=recon_loss_.item(),
-            corr_loss=corr_loss_.item(),
+            # corr_loss=corr_loss_.item(),
+            # cos_loss=cos_loss_.item(),
+            # mag_loss=mag_loss_.item(),
         )
 
     batch_size = min(5, dataset.shape[0])
