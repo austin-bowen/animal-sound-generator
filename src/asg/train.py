@@ -82,7 +82,7 @@ def main(
         np.random.shuffle(dataset)
 
         test_dataset = dataset[:40, :].copy()
-        dataset = dataset[40:, :]
+        dataset = dataset[40:50, :]
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
@@ -116,6 +116,12 @@ def main(
 
     print(f"dataset.shape={dataset.shape}")
     print(f"test_dataset.shape={test_dataset.shape}")
+
+    dac_z_std = dataset.std(axis=1).mean()
+    print(f"dac_z_std={dac_z_std}")
+    model.dac_z_std = dac_z_std
+    dataset /= dac_z_std
+    test_dataset /= dac_z_std
 
     optim = torch.optim.AdamW(
         model.parameters(),

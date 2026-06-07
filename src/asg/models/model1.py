@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-DAC_Z_STD = 3.627
 NHEAD = 32
 DIM_FEEDFORWARD = 1024 * 2
 NUM_LAYERS = 2
@@ -14,6 +13,7 @@ class Model1(nn.Module):
         super().__init__()
 
         self.h_dim = h_dim
+        self.dac_z_std = 1.0
 
         # Load pretrained model
         model_path = dac.utils.download(model_type="24khz")
@@ -99,7 +99,7 @@ class Model1(nn.Module):
             x = self.dac_model.preprocess(x, sample_rate=None)
 
             z = self.dac_model.encoder(x).detach()
-            return z / DAC_Z_STD
+            return z / self.dac_z_std
 
     def decode(self, h: torch.Tensor) -> torch.Tensor:
         """
@@ -124,7 +124,7 @@ class Model1(nn.Module):
         """
 
         with torch.no_grad():
-            z = z * DAC_Z_STD
+            z = z * self.dac_z_std
             y = self.dac_model.decoder(z)  # [B, 1, S]  reconstructed waveform
 
             return y.squeeze(1)
@@ -224,11 +224,11 @@ class Model1Decoder(nn.Module):
         pos_dim = mid_dim
         # pos_dim = 128
         self.pos_encodings = nn.Parameter(torch.randn(1, 375, pos_dim) * 0.02)
-        self.pos_proj = nn.Linear(pos_dim, mid_dim, bias=False)
+        self.pos_proj = nn.Linear(pos_dim, mid_dim)
 
         layer = nn.TransformerDecoderLayer(
             d_model=mid_dim,
-            nhead=8,
+            nhead=32,
             dim_feedforward=mid_dim * 2,
             dropout=0.0,
             batch_first=True,
@@ -240,7 +240,7 @@ class Model1Decoder(nn.Module):
         )
 
         self.out_proj = nn.Linear(mid_dim, out_dim)
-        self.out_scale = nn.Linear(mid_dim, 1)
+        # self.out_scale = nn.Linear(mid_dim, 1)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         """
