@@ -14,13 +14,6 @@ ESC_50_ANIMAL_CATEGORIES = (
 )
 
 
-def load_animal_sounds_dataset(dataset: str) -> tuple[Dataset, Dataset]:
-    if dataset == "esc50":
-        return load_esc_50_animal_sounds()
-    else:
-        raise ValueError(f"Unknown dataset: {dataset}")
-
-
 def load_esc_50_animal_sounds() -> tuple[Dataset, Dataset]:
     """
     Load the ESC-50 dataset filtered for animal sounds.

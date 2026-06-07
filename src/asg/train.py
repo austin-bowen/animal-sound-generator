@@ -13,7 +13,7 @@ from torch import nn
 from torchaudio.functional import resample
 from tqdm import tqdm
 
-from asg.datasets.esc50 import load_animal_sounds_dataset
+from asg.datasets import load_animal_sounds_dataset
 from asg.models.model0 import Model0
 from asg.models.model1 import Model1
 
