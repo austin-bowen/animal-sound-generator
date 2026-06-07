@@ -13,7 +13,7 @@ from torch import nn
 from torchaudio.functional import resample
 from tqdm import tqdm
 
-from asg.datasets import load_animal_sounds_dataset
+from asg.datasets.esc50 import load_animal_sounds_dataset
 from asg.models.model0 import Model0
 from asg.models.model1 import Model1
 
@@ -101,7 +101,8 @@ def main(
     optim = torch.optim.AdamW(
         model.parameters(),
         # lr=5e-4,
-        lr=2e-4,
+        # lr=2e-4,
+        lr=1e-3,
         # weight_decay=1e-3,
         weight_decay=0,
     )
@@ -142,7 +143,7 @@ def main(
 
         # mag_loss_ = (z_hat_.norm(dim=1) - z_.norm(dim=1)).abs().mean()
 
-        loss_ = recon_loss_ + 1e-4 * kl_loss_
+        loss_ = recon_loss_ + 0.0001 * kl_loss_
         # loss_ = recon_loss_ + corr_loss_
         # loss_ = cos_loss_ + 0.001 * mag_loss_
 

@@ -6,11 +6,11 @@ from torch import nn
 DAC_Z_STD = 3.627
 NHEAD = 32
 DIM_FEEDFORWARD = 1024 * 2
-NUM_LAYERS = 1
+NUM_LAYERS = 4
 
 
 class Model1(nn.Module):
-    def __init__(self, h_dim: int = 16) -> None:
+    def __init__(self, h_dim: int = 32) -> None:
         super().__init__()
 
         self.h_dim = h_dim
@@ -157,6 +157,11 @@ class Model1Encoder(nn.Module):
             enable_nested_tensor=False,
         )
 
+        self.pre_out_proj = nn.Sequential(
+            nn.LayerNorm(self.cls_token_count * in_dim),
+            nn.ReLU(),
+        )
+
         self.out_proj_mu = nn.Linear(self.cls_token_count * in_dim, out_dim)
         self.out_proj_log_var = nn.Linear(self.cls_token_count * in_dim, out_dim)
 
@@ -191,7 +196,7 @@ class Model1Encoder(nn.Module):
         x = x.flatten(start_dim=1)
         assert x.shape == (B, self.cls_token_count * self.in_dim)
 
-        x = F.relu(x)
+        x = self.pre_out_proj(x)
 
         mu = self.out_proj_mu(x)
         log_var = self.out_proj_log_var(x)
@@ -206,7 +211,7 @@ class Model1Decoder(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        mid_dim: int = 64,
+        mid_dim: int = 128,
     ):
         super().__init__()
 
@@ -217,7 +222,7 @@ class Model1Decoder(nn.Module):
         self.in_proj = nn.Linear(in_dim, mid_dim)
 
         # pos_dim = mid_dim
-        pos_dim = 64
+        pos_dim = 128
         self.pos_encodings = nn.Parameter(torch.randn(1, 375, pos_dim) * 0.02)
         self.pos_proj = nn.Linear(pos_dim, mid_dim, bias=False)
 
@@ -231,7 +236,7 @@ class Model1Decoder(nn.Module):
         )
         self.transformer = nn.TransformerDecoder(
             layer,
-            num_layers=1,
+            num_layers=4,
         )
 
         self.out_proj = nn.Linear(mid_dim, out_dim)
