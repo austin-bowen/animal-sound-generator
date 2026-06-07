@@ -17,6 +17,7 @@ dependencies = [
     "torch>=2.12.0",
     "torchaudio>=2.11.0",
     "torchcodec>=0.13.0",
+    "tqdm>=4.68.1",
 ]
 classifiers = [
     "License :: OSI Approved :: MIT License",
