@@ -9,6 +9,8 @@ from torchaudio.functional import resample
 from torchcodec.decoders import WavDecoder
 from tqdm import tqdm
 
+from asg.utils import doing
+
 Split = Literal["train", "val", "test", "tiny"]
 
 DEFAULT_SAMPLE_RATE = 22_050
@@ -45,9 +47,8 @@ def load_inatsounds(
         data = torch.stack(data)
 
     if resample_to != DEFAULT_SAMPLE_RATE:
-        print("Resampling... ", end="", flush=True)
-        data = resample(data, DEFAULT_SAMPLE_RATE, resample_to)
-        print("done")
+        with doing("Resampling"):
+            data = resample(data, DEFAULT_SAMPLE_RATE, resample_to)
 
     return data.numpy()
 

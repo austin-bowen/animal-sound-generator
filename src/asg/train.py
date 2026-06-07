@@ -8,14 +8,13 @@ import numpy as np
 import pandas as pd
 import torch
 import torchaudio
-from datasets import Dataset
 from torch import nn
-from torchaudio.functional import resample
-from tqdm import tqdm
 
-from asg.datasets import load_animal_sounds_dataset
+from asg.datasets import load_esc_50_animal_sounds
+from asg.datasets.inatsounds import load_inatsounds
 from asg.models.model0 import Model0
 from asg.models.model1 import Model1
+from asg.utils import doing
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,7 +22,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--dataset",
-        choices=["esc50"],
+        choices=[
+            "esc50",
+            "inatsounds",
+        ],
         required=True,
     )
 
@@ -48,6 +50,10 @@ def parse_args() -> argparse.Namespace:
 def main(
     model_checkpoint_path: str = "./tmp/model_checkpoint.pt",
     early_stop_loss: float = 0.1,
+    sample_rate: int = 24_000,
+    samples_to_save: int = 40,
+    epochs: int = 1000,
+    batch_size: int = 10,
 ) -> None:
     args = parse_args()
     print(args)
@@ -55,6 +61,34 @@ def main(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision("high")
+
+    if args.dataset == "esc50":
+        dataset = load_esc_50_animal_sounds(
+            split="train",
+            resample_to=sample_rate,
+        )
+
+        test_dataset = load_esc_50_animal_sounds(
+            split="test",
+            resample_to=sample_rate,
+        )
+    elif args.dataset == "inatsounds":
+        dataset = load_inatsounds(
+            split="tiny",
+            max_seconds=5.0,
+            resample_to=sample_rate,
+        )
+        np.random.seed(42)
+        np.random.shuffle(dataset)
+
+        test_dataset = dataset[:40, :].copy()
+        dataset = dataset[40:, :]
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
+
+    with doing(f"Saving {samples_to_save} test set samples"):
+        samples = torch.from_numpy(test_dataset[:samples_to_save])
+        save_audio("tmp/audio/dataset", samples, sample_rate=sample_rate)
 
     if args.model == "model0":
         model = Model0()
@@ -64,61 +98,45 @@ def main(
         raise ValueError(f"Unknown model: {args.model}")
     model.to(device)
 
-    def prepare_dataset(dataset_: Dataset) -> np.ndarray:
-        dataset_ = np.stack(
-            [
-                row["audio"].get_all_samples().data
-                for row in tqdm(dataset_, desc="Loading dataset")
-            ]
+    with doing("Converting training set to z"):
+        dataset = batch_apply_n2t2n(
+            model.get_dac_z,
+            dataset,
+            device=device,
+            batch_size=batch_size,
         )
-        dataset_ = dataset_.squeeze(1)
-        dataset_ = torch.from_numpy(dataset_)
-        dataset_ = resample(dataset_, 44_100, 24_000)
-        return dataset_.numpy()
 
-    dataset, test_dataset = load_animal_sounds_dataset(args.dataset)
+    with doing("Converting test set to z"):
+        test_dataset = batch_apply_n2t2n(
+            model.get_dac_z,
+            test_dataset,
+            device=device,
+            batch_size=batch_size,
+        )
 
-    dataset = prepare_dataset(dataset)
-    dataset = batch_apply_n2t2n(model.get_dac_z, dataset, device=device, batch_size=10)
-    # dataset_std = np.std(dataset)
-    dataset_std = 1
-    dataset /= dataset_std
-    # dataset = dataset[:80, :]
-    print(f"train_dataset.shape={dataset.shape}")
-
-    test_dataset = prepare_dataset(test_dataset)
-    test_dataset /= dataset_std
-    test_dataset = test_dataset[:40, :]
-
-    samples = torch.from_numpy(test_dataset)
-    save_audio("tmp/audio/dataset", samples, sample_rate=24_000)
-
-    test_dataset = batch_apply_n2t2n(
-        model.get_dac_z, test_dataset, device=device, batch_size=10
-    )
+    print(f"dataset.shape={dataset.shape}")
     print(f"test_dataset.shape={test_dataset.shape}")
 
     optim = torch.optim.AdamW(
         model.parameters(),
         # lr=5e-4,
         # lr=2e-4,
-        lr=1e-3,
+        lr=2e-4,
         # weight_decay=1e-3,
         weight_decay=0,
     )
 
     if args.load:
-        print(f"Loading checkpoint from {model_checkpoint_path}")
+        with doing(f"Loading checkpoint from {model_checkpoint_path}"):
+            checkpoint = torch.load(
+                model_checkpoint_path,
+                map_location="cpu",
+                weights_only=True,
+            )
 
-        checkpoint = torch.load(
-            model_checkpoint_path,
-            map_location="cpu",
-            weights_only=True,
-        )
-
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optim.load_state_dict(checkpoint["optim_state_dict"])
-        epoch_start = checkpoint["epoch"] + 1
+            model.load_state_dict(checkpoint["model_state_dict"])
+            optim.load_state_dict(checkpoint["optim_state_dict"])
+            epoch_start = checkpoint["epoch"] + 1
     else:
         epoch_start = 0
 
@@ -143,7 +161,7 @@ def main(
 
         # mag_loss_ = (z_hat_.norm(dim=1) - z_.norm(dim=1)).abs().mean()
 
-        loss_ = recon_loss_ + 0.0001 * kl_loss_
+        loss_ = recon_loss_ + 0.0 * kl_loss_
         # loss_ = recon_loss_ + corr_loss_
         # loss_ = cos_loss_ + 0.001 * mag_loss_
 
@@ -155,8 +173,7 @@ def main(
             # mag_loss=mag_loss_.item(),
         )
 
-    batch_size = min(5, dataset.shape[0])
-    for epoch in range(epoch_start, epoch_start + 1000):
+    for epoch in range(epoch_start, epoch_start + epochs):
         # Shuffle dataset in place
         np.random.shuffle(dataset)
 
