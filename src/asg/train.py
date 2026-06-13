@@ -1,7 +1,9 @@
 import argparse
 import math
 import os
+import random
 from collections.abc import Callable
+from datetime import datetime
 from typing import cast
 
 import numpy as np
@@ -12,8 +14,11 @@ from torch import nn
 
 from asg.datasets import load_esc_50_animal_sounds
 from asg.datasets.inatsounds import load_inatsounds
+from asg.models.base import BaseDACModel
 from asg.models.model0 import Model0
 from asg.models.model1 import Model1
+from asg.models.zelsa import ZELSA
+from asg.models.zvae import ZVAE
 from asg.utils import doing
 
 
@@ -23,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset",
         choices=[
+            "random",
             "esc50",
             "inatsounds",
         ],
@@ -34,6 +40,8 @@ def parse_args() -> argparse.Namespace:
         choices=[
             "model0",
             "model1",
+            "zelsa",
+            "zvae",
         ],
         required=True,
     )
@@ -49,20 +57,35 @@ def parse_args() -> argparse.Namespace:
 
 def main(
     model_checkpoint_path: str = "./tmp/model_checkpoint.pt",
-    early_stop_loss: float = 0.1,
+    early_stop_loss: float = 0.001,
     sample_rate: int = 24_000,
     samples_to_save: int = 40,
     epochs: int = 1000,
-    batch_size: int = 10,
+    batch_size: int = 8,
+    dtype: torch.dtype = torch.float32,
 ) -> None:
     args = parse_args()
     print(args)
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision("high")
 
-    if args.dataset == "esc50":
+    if args.dataset == "random":
+        samples = round(sample_rate * 5.0)
+
+        def gen_random_samples():
+            s_ = np.random.random_sample((100, samples))
+            s_ = s_ * 2 - 1
+            return s_.astype(np.float32)
+
+        dataset = gen_random_samples()
+        test_dataset = gen_random_samples()
+    elif args.dataset == "esc50":
         dataset = load_esc_50_animal_sounds(
             split="train",
             resample_to=sample_rate,
@@ -74,33 +97,35 @@ def main(
         )
     elif args.dataset == "inatsounds":
         dataset = load_inatsounds(
-            split="tiny",
-            max_seconds=5.0,
+            split="train",
+            max_files=1000,
             resample_to=sample_rate,
         )
-        np.random.seed(42)
-        np.random.shuffle(dataset)
 
-        test_dataset = dataset[:40, :].copy()
-        dataset = dataset[40:50, :]
+        test_dataset = load_inatsounds(
+            split="val",
+            max_files=100,
+            resample_to=sample_rate,
+        )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
-    with doing(f"Saving {samples_to_save} test set samples"):
-        samples = torch.from_numpy(test_dataset[:samples_to_save])
-        save_audio("tmp/audio/dataset", samples, sample_rate=sample_rate)
-
+    model: BaseDACModel
     if args.model == "model0":
         model = Model0()
     elif args.model == "model1":
         model = Model1()
+    elif args.model == "zelsa":
+        model = ZELSA()
+    elif args.model == "zvae":
+        model = ZVAE()
     else:
         raise ValueError(f"Unknown model: {args.model}")
     model.to(device)
 
     with doing("Converting training set to z"):
         dataset = batch_apply_n2t2n(
-            model.get_dac_z,
+            model.samples_to_z,
             dataset,
             device=device,
             batch_size=batch_size,
@@ -108,7 +133,7 @@ def main(
 
     with doing("Converting test set to z"):
         test_dataset = batch_apply_n2t2n(
-            model.get_dac_z,
+            model.samples_to_z,
             test_dataset,
             device=device,
             batch_size=batch_size,
@@ -117,17 +142,23 @@ def main(
     print(f"dataset.shape={dataset.shape}")
     print(f"test_dataset.shape={test_dataset.shape}")
 
-    dac_z_std = dataset.std(axis=1).mean()
+    dac_z_std = dataset.std(axis=2).mean()
     print(f"dac_z_std={dac_z_std}")
     model.dac_z_std = dac_z_std
     dataset /= dac_z_std
     test_dataset /= dac_z_std
 
+    with doing(f"Saving {samples_to_save} test set samples"):
+        z = test_dataset[:samples_to_save]
+        z = torch.from_numpy(z).to(dtype=dtype, device=device)
+        samples = model.z_to_samples(z)
+        save_audio("tmp/audio/dataset", samples, sample_rate=sample_rate)
+
     optim = torch.optim.AdamW(
         model.parameters(),
         # lr=5e-4,
         # lr=2e-4,
-        lr=2e-4,
+        lr=1e-3,
         # weight_decay=1e-3,
         weight_decay=0,
     )
@@ -146,54 +177,26 @@ def main(
     else:
         epoch_start = 0
 
+    model.to(dtype=dtype)
     model.compile(dynamic=False)
-
-    recon_loss_fn = nn.MSELoss()
-
-    # corr_loss_mask = torch.tril(
-    #     torch.ones(model.h_dim, model.h_dim, device=device),
-    #     diagonal=-1,  # Exclude diagonal
-    # )
-
-    def get_loss(z_hat_, z_, mu_, log_var_) -> tuple[torch.Tensor, dict[str, float]]:
-        recon_loss_ = recon_loss_fn(z_hat_, z_)
-        kl_loss_ = -0.5 * (1 + log_var_ - mu_.pow(2) - log_var_.exp()).sum(dim=1).mean()
-
-        # corr_loss_ = (mu_.T @ mu_) * corr_loss_mask
-        # corr_loss_ = corr_loss_.abs().mean()
-
-        # cos_loss_ = nn.functional.cosine_similarity(z_hat_, z_, dim=1)
-        # cos_loss_ = 1 - cos_loss_.mean()
-
-        # mag_loss_ = (z_hat_.norm(dim=1) - z_.norm(dim=1)).abs().mean()
-
-        loss_ = recon_loss_ + 0.0 * kl_loss_
-        # loss_ = recon_loss_ + corr_loss_
-        # loss_ = cos_loss_ + 0.001 * mag_loss_
-
-        return loss_, dict(
-            recon_loss=recon_loss_.item(),
-            kl_loss=kl_loss_.item(),
-            # corr_loss=corr_loss_.item(),
-            # cos_loss=cos_loss_.item(),
-            # mag_loss=mag_loss_.item(),
-        )
 
     for epoch in range(epoch_start, epoch_start + epochs):
         # Shuffle dataset in place
         np.random.shuffle(dataset)
 
         model.train()
+        t0 = datetime.now()
         losses: dict[str, float] = run_epoch(
             model=model,
             dataset=dataset,
             batch_size=batch_size,
+            dtype=dtype,
             device=device,
-            loss_fn=get_loss,
             optim=optim,
         )
+        dt = datetime.now() - t0
         avg_train_loss = losses["loss"]
-        print(f"[e{epoch}] train loss: {losses}")
+        print(f"[e{epoch}] train loss: {losses} dt={dt}")
 
         if epoch % 10 == 0:
             model.eval()
@@ -202,14 +205,15 @@ def main(
                     model=model,
                     dataset=test_dataset,
                     batch_size=batch_size,
+                    dtype=dtype,
                     device=device,
-                    loss_fn=get_loss,
                     return_samples=True,
                 )
 
                 print(f"[e{epoch}]  test loss: {losses}")
                 print()
 
+                samples = samples[:samples_to_save]
                 save_audio(f"tmp/audio/epoch={epoch}", samples, sample_rate=24_000)
 
             # Save state
@@ -229,12 +233,13 @@ def main(
 
 def run_epoch(
     *,
-    model: nn.Module,
+    model: BaseDACModel,
     dataset: np.ndarray,
     batch_size: int,
+    dtype: torch.dtype,
     device,
-    loss_fn,
     optim: torch.optim.Optimizer | None = None,
+    norm_grad: bool = False,
     clip_grad: float | None = None,
     return_samples: bool = False,
 ) -> dict[str, float] | tuple[dict[str, float], torch.Tensor]:
@@ -245,27 +250,30 @@ def run_epoch(
         if z.shape[0] != batch_size:
             continue
 
-        z = torch.from_numpy(z).to(device)
+        z = torch.from_numpy(z).to(dtype=dtype, device=device)
 
-        mu, log_var, z_hat = model(z)
+        z_hat, extras = model(z)
 
-        loss, loss_dict = loss_fn(z_hat, z, mu, log_var)
+        loss, loss_dict = model.get_loss(z, z_hat, extras)
 
         if optim:
             optim.zero_grad()
 
             loss.backward()
+
+            # Normalize gradients
+            if norm_grad:
+                for param in model.parameters():
+                    if param.grad is None:
+                        continue
+                    param.grad = param.grad / param.grad.norm()
+
             if clip_grad is not None:
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad)
 
             optim.step()
 
-        losses.append(
-            {
-                "loss": loss.item(),
-                **loss_dict,
-            }
-        )
+        losses.append(loss_dict)
 
         if return_samples:
             batch_samples = model.z_to_samples(z_hat)
@@ -311,4 +319,7 @@ def save_audio(path, batch: torch.Tensor, sample_rate: int) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
