@@ -15,7 +15,6 @@ from torch import nn
 from asg.datasets import load_esc_50_animal_sounds
 from asg.datasets.inatsounds import load_inatsounds
 from asg.models.base import BaseDACModel
-from asg.models.model0 import Model0
 from asg.models.model1 import Model1
 from asg.models.zelsa import ZELSA
 from asg.models.zvae import ZVAE
@@ -38,7 +37,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         choices=[
-            "model0",
             "model1",
             "zelsa",
             "zvae",
@@ -111,9 +109,7 @@ def main(
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
     model: BaseDACModel
-    if args.model == "model0":
-        model = Model0()
-    elif args.model == "model1":
+    if args.model == "model1":
         model = Model1()
     elif args.model == "zelsa":
         model = ZELSA()
