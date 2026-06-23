@@ -16,6 +16,7 @@ from asg.datasets import load_esc_50_animal_sounds
 from asg.datasets.inatsounds import load_inatsounds
 from asg.models.base import BaseDACModel
 from asg.models.model1 import Model1
+from asg.models.model2 import Model2
 from asg.models.zelsa import ZELSA
 from asg.models.zvae import ZVAE
 from asg.utils import doing, graph_grads
@@ -38,6 +39,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         choices=[
             "model1",
+            "model2",
             "zelsa",
             "zvae",
         ],
@@ -111,6 +113,8 @@ def main(
     model: BaseDACModel
     if args.model == "model1":
         model = Model1()
+    elif args.model == "model2":
+        model = Model2()
     elif args.model == "zelsa":
         model = ZELSA()
     elif args.model == "zvae":
