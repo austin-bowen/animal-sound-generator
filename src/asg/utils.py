@@ -4,6 +4,7 @@ from datetime import datetime
 from itertools import chain, zip_longest
 from typing import TypeVar
 
+import matplotlib.pyplot as plt
 from torch import nn
 
 T = TypeVar("T")
@@ -22,6 +23,30 @@ def doing(thing: str):
 
     dt = datetime.now() - start
     print(f" done ({dt})")
+
+
+def graph_grads(model: nn.Module, out_path: str, bias: bool = True):
+    """Graphs avg abs gradient by layer and saves to out_path."""
+
+    names, values = [], []
+    for name, param in model.named_parameters():
+        if param.grad is not None and (bias or "bias" not in name):
+            names.append(name)
+            value = param.grad.abs().mean().item()
+            values.append(value)
+
+            if value == 0.0:
+                print(f"WARN: Layer with zero grad: {name}")
+
+    fig, ax = plt.subplots(figsize=(max(8, len(names) * 0.4), 5))
+    ax.bar(range(len(names)), values)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels(names, rotation=90, fontsize=8)
+    ax.set_ylabel("Mean Absolute Gradient")
+    ax.set_title("Gradient Magnitudes by Layer")
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close(fig)
 
 
 def interleave(lst: Iterable[Iterable[T]]) -> Iterable[T]:

@@ -14,7 +14,8 @@ class Loss(ABC):
 
 class EmbeddingReconLoss(Loss):
     def __init__(self):
-        self._loss_fn = nn.MSELoss(reduction="none")
+        # self._loss_fn = nn.MSELoss(reduction="none")
+        self._loss_fn = nn.SmoothL1Loss(reduction="none")
 
     def __call__(self, input: Tensor, target: Tensor) -> Tensor:
         assert input.shape == target.shape

@@ -5,13 +5,11 @@ from torch import Tensor, nn
 from asg.losses import EmbeddingReconLoss, VAEKLLoss
 from asg.models.base import BaseDACModel, ForwardExtras, LossDict
 
-NHEAD = 32
-DIM_FEEDFORWARD = 1024 * 2
 NUM_LAYERS = 1
 
 
 class Model1(BaseDACModel):
-    def __init__(self, h_dim: int = 128) -> None:
+    def __init__(self, h_dim: int = 1024 * 1) -> None:
         super().__init__()
 
         self.h_dim = h_dim
@@ -111,7 +109,7 @@ class Model1Encoder(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        mid_dim: int = 128,
+        mid_dim: int = 1024,
     ):
         super().__init__()
 
@@ -132,8 +130,8 @@ class Model1Encoder(nn.Module):
 
         layer = nn.TransformerEncoderLayer(
             d_model=mid_dim,
-            nhead=NHEAD,
-            dim_feedforward=DIM_FEEDFORWARD,
+            nhead=mid_dim // 16,
+            dim_feedforward=mid_dim * 2,
             dropout=0.0,
             batch_first=True,
         )
@@ -144,8 +142,8 @@ class Model1Encoder(nn.Module):
         )
 
         self.pre_out_proj = nn.Sequential(
-            nn.LayerNorm(self.cls_token_count * mid_dim),
             nn.ReLU(),
+            nn.LayerNorm(self.cls_token_count * mid_dim),
         )
 
         self.out_proj_mu = nn.Linear(self.cls_token_count * mid_dim, out_dim)
@@ -184,10 +182,12 @@ class Model1Encoder(nn.Module):
         assert x.shape == (B, self.cls_token_count * self.mid_dim)
 
         x = self.pre_out_proj(x)
+        assert x.shape == (B, self.cls_token_count * self.mid_dim)
 
         mu = self.out_proj_mu(x)
-        log_var = self.out_proj_log_var(x)
         assert mu.shape == (B, self.out_dim)
+
+        log_var = self.out_proj_log_var(x)
         assert log_var.shape == (B, self.out_dim)
 
         return mu, log_var
@@ -198,7 +198,7 @@ class Model1Decoder(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        mid_dim: int = 128,
+        mid_dim: int = 1024,
     ):
         super().__init__()
 
@@ -208,14 +208,11 @@ class Model1Decoder(nn.Module):
 
         self.in_proj = nn.Linear(in_dim, mid_dim)
 
-        pos_dim = mid_dim
-        # pos_dim = 128
-        self.pos_encodings = nn.Parameter(torch.randn(1, 375, pos_dim) * 0.02)
-        self.pos_proj = nn.Linear(pos_dim, mid_dim)
+        self.pos_encodings = nn.Parameter(torch.randn(1, 375, mid_dim) * 0.02)
 
         layer = nn.TransformerDecoderLayer(
             d_model=mid_dim,
-            nhead=32,
+            nhead=mid_dim // 16,
             dim_feedforward=mid_dim * 2,
             dropout=0.0,
             batch_first=True,
@@ -227,6 +224,8 @@ class Model1Decoder(nn.Module):
         )
 
         self.out_proj = nn.Linear(mid_dim, out_dim)
+
+        self.whole_sequence_baseline = nn.Linear(in_dim, out_dim)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         """
@@ -240,15 +239,16 @@ class Model1Decoder(nn.Module):
         B, in_dim = h.shape
         T = 375
 
-        h = self.in_proj(h)
         h = h.unsqueeze(1)
+        assert h.shape == (B, 1, self.in_dim)
+
+        baseline = self.whole_sequence_baseline(h)
+        assert baseline.shape == (B, 1, self.out_dim)
+
+        h = self.in_proj(h)
         assert h.shape == (B, 1, self.mid_dim)
 
-        # tokens = tokens.unsqueeze(1).expand(B, T, self.mid_dim)
-        # tokens = tokens * self.pos_proj(self.pos_encodings)
-        # tokens = self.pos_proj(self.pos_encodings)
-        tokens = h * self.pos_proj(self.pos_encodings)
-        # tokens = tokens.expand(B, T, self.mid_dim)
+        tokens = h + self.pos_encodings
         assert tokens.shape == (B, T, self.mid_dim)
 
         x = self.transformer(
@@ -264,6 +264,9 @@ class Model1Decoder(nn.Module):
                 (self.mid_dim,),
             ),
         )
+        assert x.shape == (B, T, self.out_dim)
+
+        x = x + baseline
         assert x.shape == (B, T, self.out_dim)
 
         return x

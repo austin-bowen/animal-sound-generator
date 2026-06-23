@@ -18,7 +18,7 @@ from asg.models.base import BaseDACModel
 from asg.models.model1 import Model1
 from asg.models.zelsa import ZELSA
 from asg.models.zvae import ZVAE
-from asg.utils import doing
+from asg.utils import doing, graph_grads
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,7 +77,7 @@ def main(
         samples = round(sample_rate * 5.0)
 
         def gen_random_samples():
-            s_ = np.random.random_sample((100, samples))
+            s_ = np.random.random_sample((10 * batch_size, samples))
             s_ = s_ * 2 - 1
             return s_.astype(np.float32)
 
@@ -154,7 +154,7 @@ def main(
         model.parameters(),
         # lr=5e-4,
         # lr=2e-4,
-        lr=1e-3,
+        lr=1e-4,
         # weight_decay=1e-3,
         weight_decay=0,
     )
@@ -268,6 +268,10 @@ def run_epoch(
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad)
 
             optim.step()
+
+            if step == 0:
+                graph_grads(model, "tmp/grads.png")
+                # input("Press Enter to continue...")
 
         losses.append(loss_dict)
 
