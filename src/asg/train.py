@@ -15,6 +15,7 @@ from torch import nn
 from asg.datasets import load_esc_50_animal_sounds
 from asg.datasets.inatsounds import load_inatsounds
 from asg.models.base import BaseDACModel
+from asg.models.memorizer import Memorizer
 from asg.models.model1 import Model1
 from asg.models.model2 import Model2
 from asg.models.zelsa import ZELSA
@@ -38,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         choices=[
+            "memorizer",
             "model1",
             "model2",
             "zelsa",
@@ -61,7 +63,7 @@ def main(
     sample_rate: int = 24_000,
     samples_to_save: int = 40,
     epochs: int = 1000,
-    batch_size: int = 8,
+    batch_size: int = 1,
     dtype: torch.dtype = torch.float32,
 ) -> None:
     args = parse_args()
@@ -76,7 +78,8 @@ def main(
         torch.set_float32_matmul_precision("high")
 
     if args.dataset == "random":
-        samples = round(sample_rate * 5.0)
+        # samples = round(sample_rate * 5.0)
+        samples = round(sample_rate * 2.0)
 
         def gen_random_samples():
             s_ = np.random.random_sample((10 * batch_size, samples))
@@ -98,20 +101,24 @@ def main(
     elif args.dataset == "inatsounds":
         dataset = load_inatsounds(
             split="train",
-            max_files=1000,
+            max_files=1,
             resample_to=sample_rate,
         )
+        # dataset = dataset[0:1]
 
         test_dataset = load_inatsounds(
             split="val",
-            max_files=100,
+            max_files=1,
             resample_to=sample_rate,
         )
+        test_dataset = dataset
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
     model: BaseDACModel
-    if args.model == "model1":
+    if args.model == "memorizer":
+        model = Memorizer()
+    elif args.model == "model1":
         model = Model1()
     elif args.model == "model2":
         model = Model2()
@@ -139,6 +146,9 @@ def main(
             batch_size=batch_size,
         )
 
+    dataset = dataset[:, 0:3]
+    test_dataset = test_dataset[:, 0:3]
+
     print(f"dataset.shape={dataset.shape}")
     print(f"test_dataset.shape={test_dataset.shape}")
 
@@ -158,7 +168,8 @@ def main(
         model.parameters(),
         # lr=5e-4,
         # lr=2e-4,
-        lr=1e-4,
+        # lr=1e-4,
+        lr=0.0001,
         # weight_decay=1e-3,
         weight_decay=0,
     )
