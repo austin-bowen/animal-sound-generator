@@ -27,7 +27,7 @@ def load_inatsounds(
     max_files: int | None = None,
     start_seconds: float = 1.0,
     min_seconds: float = 1.0,
-    max_seconds: float | None = 5.0,
+    max_seconds: float | None = 2.0,
     resample_to: int = DEFAULT_SAMPLE_RATE,
     normalize_level: bool = True,
 ) -> np.ndarray:
