@@ -2,13 +2,23 @@ import torch
 from torch import Tensor, nn
 
 from asg.losses import EmbeddingReconLoss, VAEKLLoss
-from asg.models.base import BaseDACModel, ForwardExtras, LossDict
+from asg.models.base import (
+    BaseDACModel,
+    ForwardExtras,
+    LossDict,
+    SinusoidalPositionalEncoding,
+)
 
-NUM_LAYERS = 1
+NUM_LAYERS = 4
 
 
 class Model2(BaseDACModel):
-    def __init__(self, T: int = 375, h_dim: int = 1024 * 1) -> None:
+    def __init__(
+        self,
+        # T: int = 375,
+        T: int = 3,
+        h_dim: int = 1024,
+    ) -> None:
         super().__init__()
 
         self.h_dim = h_dim
@@ -47,11 +57,13 @@ class Model2(BaseDACModel):
             h: [B, h_dim]
         """
 
-        if self.training:
-            std = torch.exp(0.5 * log_var)
-            eps = torch.randn_like(std)
-            return mu + eps * std
-        return mu
+        # return mu
+        if not self.training:
+            return mu
+
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def encode(
         self, x: torch.Tensor
@@ -92,9 +104,10 @@ class Model2(BaseDACModel):
 
         mu = extras["mu"]
         log_var = extras["log_var"]
-        kl_loss = self.kl_loss_fn(mu, log_var)
+        # kl_loss = self.kl_loss_fn(mu, log_var)
+        kl_loss = torch.zeros(1, device=mu.device)
 
-        loss = (recon_loss + 0.0001 * kl_loss).mean()
+        loss = (recon_loss + 0.0000 * kl_loss).mean()
 
         return loss, dict(
             loss=loss.item(),
@@ -109,7 +122,8 @@ class Model2Encoder(nn.Module):
         T: int,
         in_dim: int,
         out_dim: int,
-        mid_dim: int = 1024,
+        mid_dim: int = 128,
+        pos_dim: int = 64,
     ):
         super().__init__()
 
@@ -122,23 +136,29 @@ class Model2Encoder(nn.Module):
             nn.Linear(in_dim, mid_dim),
         )
 
-        self.pos_encodings = nn.Parameter(torch.randn(1, T, mid_dim) * 0.02)
+        self.pos_encodings = SinusoidalPositionalEncoding(T, mid_dim)
+        # self.pos_encodings = nn.Parameter(torch.randn(1, T, pos_dim) * 0.02)
+        # self.pos_proj = nn.Linear(pos_dim, mid_dim)
 
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=mid_dim,
-                nhead=mid_dim // 16,
+                nhead=8,
                 dim_feedforward=mid_dim * 2,
                 dropout=0.0,
+                activation=nn.LeakyReLU(),
                 batch_first=True,
+                norm_first=True,
             ),
             num_layers=NUM_LAYERS,
             enable_nested_tensor=False,
         )
 
         self.pre_out_proj = nn.Sequential(
+            nn.LayerNorm(mid_dim, elementwise_affine=False),
+            nn.Linear(mid_dim, mid_dim),
             nn.LeakyReLU(),
-            nn.LayerNorm(mid_dim),
+            nn.LayerNorm(mid_dim, elementwise_affine=False),
         )
 
         self.out_proj_mu = nn.Linear(mid_dim, out_dim)
@@ -155,21 +175,23 @@ class Model2Encoder(nn.Module):
         """
 
         B, T, _ = x.shape
-        assert x.shape == (B, T, self.in_dim), x.shape
+        assert x.shape == (B, self.T, self.in_dim), x.shape
 
         x = self.in_proj(x)
         assert x.shape == (B, T, self.mid_dim)
 
-        x = x + self.pos_encodings
-        assert x.shape == (B, T, self.mid_dim)
+        # pos_encodings = self.pos_proj(self.pos_encodings)
+        # x = x + pos_encodings
+        x = self.pos_encodings(x)
+        assert x.shape == (B, T, self.mid_dim), x.shape
 
         x = self.transformer(x)
         assert x.shape == (B, T, self.mid_dim)
 
-        x = x.mean(dim=1)
-        assert x.shape == (B, self.mid_dim)
-
         x = self.pre_out_proj(x)
+        assert x.shape == (B, T, self.mid_dim)
+
+        x = x.mean(dim=1)
         assert x.shape == (B, self.mid_dim)
 
         mu = self.out_proj_mu(x)
@@ -187,7 +209,8 @@ class Model2Decoder(nn.Module):
         T: int,
         in_dim: int,
         out_dim: int,
-        mid_dim: int = 1024,
+        mid_dim: int = 128,
+        pos_dim: int = 64,
     ):
         super().__init__()
 
@@ -199,14 +222,17 @@ class Model2Decoder(nn.Module):
         self.in_memory_proj = nn.Linear(in_dim, mid_dim)
         self.in_token_proj = nn.Linear(in_dim, mid_dim)
 
-        self.pos_encodings = nn.Parameter(torch.randn(1, T, mid_dim) * 0.02)
+        self.pos_encodings = SinusoidalPositionalEncoding(T, mid_dim)
+        # self.pos_encodings = nn.Parameter(torch.randn(1, T, pos_dim) * 0.02)
+        # self.pos_proj = nn.Linear(pos_dim, mid_dim)
 
         self.transformer = nn.TransformerDecoder(
             nn.TransformerDecoderLayer(
                 d_model=mid_dim,
-                nhead=mid_dim // 16,
+                nhead=8,
                 dim_feedforward=mid_dim * 2,
                 dropout=0.0,
+                activation=nn.LeakyReLU(),
                 batch_first=True,
                 norm_first=True,
             ),
@@ -214,8 +240,8 @@ class Model2Decoder(nn.Module):
         )
 
         self.out_proj = nn.Sequential(
-            nn.LeakyReLU(),
-            nn.LayerNorm(mid_dim),
+            # nn.LeakyReLU(),
+            # nn.LayerNorm(mid_dim),
             nn.Linear(mid_dim, out_dim),
         )
 
@@ -237,7 +263,10 @@ class Model2Decoder(nn.Module):
         tokens = self.in_token_proj(h)
         assert tokens.shape == (B, 1, self.mid_dim)
 
-        tokens = h + self.pos_encodings
+        # pos_encodings = self.pos_proj(self.pos_encodings)
+        # tokens = tokens + pos_encodings
+        tokens = tokens.expand(-1, T, -1)
+        tokens = self.pos_encodings(tokens)
         assert tokens.shape == (B, T, self.mid_dim)
 
         memory = self.in_memory_proj(h)

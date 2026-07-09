@@ -1,3 +1,4 @@
+import math
 from abc import ABC, abstractmethod
 
 import dac
@@ -93,3 +94,34 @@ class BaseDACModel(BaseModel, ABC):
             assert y.shape == (B, S)
 
             return y
+
+
+class SinusoidalPositionalEncoding(nn.Module):
+    def __init__(self, max_len: int, d_model: int):
+        super().__init__()
+
+        # Precompute the encoding table once, at construction time
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(
+            1
+        )  # (max_len, 1)
+
+        # div_term = 1 / (10000^(2i/d_model)), computed in log-space for stability
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float32)
+            * (-math.log(10000.0) / d_model)
+        )  # (d_model/2,)
+
+        pe[:, 0::2] = torch.sin(position * div_term)  # even indices
+        pe[:, 1::2] = torch.cos(position * div_term)  # odd indices
+
+        pe = pe.unsqueeze(0)  # (1, max_len, d_model) for easy broadcasting over batch
+
+        # Register as a buffer: moves with .to(device), saved in state_dict (optionally),
+        # but NOT a learnable parameter and not touched by the optimizer
+        self.register_buffer("pe", pe, persistent=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, seq_len, d_model)
+        seq_len = x.size(1)
+        return x + self.pe[:, :seq_len, :]
